@@ -1,7 +1,9 @@
-name: Build APK
+name: Build Android APK
 
 on:
   push:
+    branches: [ main, master ]
+  pull_request:
     branches: [ main, master ]
   workflow_dispatch:
 
@@ -10,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-    - name: Checkout code
+    - name: Checkout repository
       uses: actions/checkout@v4
       
     - name: Set up JDK 17
@@ -19,29 +21,74 @@ jobs:
         java-version: '17'
         distribution: 'temurin'
     
-    - name: Install Android SDK
+    - name: Setup Android SDK
       uses: android-actions/setup-android@v3
-    
-    - name: Accept Android licenses
+      
+    - name: Accept Android SDK licenses
       run: yes | sdkmanager --licenses || true
-    
-    - name: Install Android SDK packages
+      
+    - name: Install required Android SDK components
       run: |
-        sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
-    
-    - name: Initialize Gradle Wrapper
+        sdkmanager --install "platforms;android-34"
+        sdkmanager --install "build-tools;34.0.0"
+        sdkmanager --install "platform-tools"
+        
+    - name: Verify Gradle wrapper properties
       run: |
-        gradle wrapper --gradle-version 8.2
-    
+        echo "=== Checking gradle-wrapper.properties ==="
+        if [ -f "gradle/wrapper/gradle-wrapper.properties" ]; then
+          cat gradle/wrapper/gradle-wrapper.properties
+        else
+          echo "WARNING: gradle-wrapper.properties not found!"
+        fi
+        
+    - name: Download and setup Gradle 8.2
+      run: |
+        echo "Downloading Gradle 8.2..."
+        wget -q https://services.gradle.org/distributions/gradle-8.2-bin.zip
+        unzip -q gradle-8.2-bin.zip
+        echo "Gradle 8.2 downloaded and extracted"
+        
+    - name: Initialize Gradle wrapper with version 8.2
+      run: |
+        ./gradle-8.2/bin/gradle wrapper --gradle-version 8.2 --distribution-type bin
+        echo "Gradle wrapper initialized with version 8.2"
+        
     - name: Make gradlew executable
       run: chmod +x gradlew
-    
-    - name: Build Debug APK
-      run: ./gradlew assembleDebug --stacktrace
       
-    - name: Upload APK
+    - name: Verify Gradle version
+      run: ./gradlew --version
+      
+    - name: Clean project
+      run: ./gradlew clean --stacktrace
+      
+    - name: Build Debug APK
+      run: ./gradlew assembleDebug --stacktrace --warning-mode all
+      env:
+        ANDROID_HOME: ${{ env.ANDROID_SDK_ROOT }}
+      
+    - name: List generated APK files
+      if: always()
+      run: |
+        echo "=== Searching for APK files ==="
+        find . -name "*.apk" -type f
+        
+    - name: Upload Debug APK
       uses: actions/upload-artifact@v4
       if: success()
       with:
-        name: app-debug
+        name: app-debug-apk
         path: app/build/outputs/apk/debug/app-debug.apk
+        retention-days: 30
+        if-no-files-found: error
+        
+    - name: Upload build reports on failure
+      uses: actions/upload-artifact@v4
+      if: failure()
+      with:
+        name: build-reports
+        path: |
+          **/build/reports/
+          **/build/outputs/logs/
+        retention-days: 7
